@@ -60,6 +60,8 @@ def launch_setup(context, *args, **kwargs):
     description_file = LaunchConfiguration("description_file")
     kinematics_params_file = LaunchConfiguration("kinematics_params_file")
     tf_prefix = LaunchConfiguration("tf_prefix")
+    parent_link = LaunchConfiguration("parent")
+    robot_origin = LaunchConfiguration("origin")
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
     controller_spawner_timeout = LaunchConfiguration("controller_spawner_timeout")
@@ -134,6 +136,12 @@ def launch_setup(context, *args, **kwargs):
             " ",
             "name:=",
             ur_type,
+            " ",
+            "parent:=",
+            parent_link,
+            " ",
+            "origin:=",
+            robot_origin,
             " ",
             "script_filename:=",
             script_filename,
@@ -338,7 +346,7 @@ def launch_setup(context, *args, **kwargs):
             executable="spawner",
             arguments=[
                 "--controller-manager",
-                "/controller_manager",
+                "controller_manager",
                 "--controller-manager-timeout",
                 controller_spawner_timeout,
             ]
@@ -393,6 +401,13 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     declared_arguments = []
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "origin",
+            default_value='"0 0 0 0 0 0"',
+            description="Robot origin as 'x y z r p y' (default: 0 0 0 0 0 0)",
+        )
+    )
     # UR specific arguments
     declared_arguments.append(
         DeclareLaunchArgument(
@@ -469,6 +484,13 @@ def generate_launch_description():
             "description_file",
             default_value="ur.urdf.xacro",
             description="URDF/XACRO description file with the robot.",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "parent",
+            default_value="world",
+            description="Parent link for the UR robot (default: world)",
         )
     )
     declared_arguments.append(

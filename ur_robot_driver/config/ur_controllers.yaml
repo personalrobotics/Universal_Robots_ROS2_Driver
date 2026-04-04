@@ -1,5 +1,7 @@
 controller_manager:
   ros__parameters:
+    update_rate: 500  # Hz, must be here (not just in update_rate.yaml) for namespaced launches
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 

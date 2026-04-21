@@ -34,6 +34,8 @@ from controller_manager_msgs.srv import (
     SwitchController,
     LoadController,
     UnloadController,
+    SetHardwareComponentState,
+    ListHardwareComponents,
 )
 from launch import LaunchDescription
 from launch.actions import (
@@ -51,17 +53,35 @@ from rclpy.action import ActionClient
 from std_srvs.srv import Trigger
 from ur_dashboard_msgs.msg import RobotMode
 from ur_dashboard_msgs.srv import (
+    DownloadProgram,
     GetLoadedProgram,
     GetProgramState,
+    GetPrograms,
     GetRobotMode,
+    IsInRemoteControl,
     IsProgramRunning,
     Load,
+    UploadProgram,
+    GenerateSupportFile,
+    GenerateFlightReport,
+    GetUserRole,
+    GetSerialNumber,
+    GetPolyScopeVersion,
+    GetRobotModel,
+    GetOperationalMode,
+    GetSafetyStatus,
+    SetOperationalMode,
+    SetUserRole,
 )
-from ur_msgs.srv import SetIO, GetRobotSoftwareVersion, SetForceMode
+from ur_msgs.srv import SetIO, GetRobotSoftwareVersion, SetForceMode, SetFrictionModelParameters
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 TIMEOUT_WAIT_SERVICE = 10
 TIMEOUT_WAIT_SERVICE_INITIAL = 120  # If we download the docker image simultaneously to the tests, it can take quite some time until the dashboard server is reachable and usable.
 TIMEOUT_WAIT_ACTION = 10
+TIMEOUT_EXECUTE_TRAJECTORY = 30
 
 ROBOT_JOINTS = [
     "elbow_joint",
@@ -104,7 +124,11 @@ def _call_service(node, client, request):
     rclpy.spin_until_future_complete(node, future)
 
     if future.result() is not None:
-        logging.info("  Received result: %s", future.result())
+        response_str = str(future.result())
+        if type(future.result()).__name__ == "ListControllers_Response":
+            controllers_str_list = [f"{c.name}: {c.state}" for c in future.result().controller]
+            response_str = f"controllers: [{', '.join(controllers_str_list)}]"
+        logging.info("  Received result: %s", response_str)
         return future.result()
 
     raise Exception(f"Error while calling service '{client.srv_name}': {future.exception()}")
@@ -224,22 +248,43 @@ class DashboardInterface(
         "program_running": IsProgramRunning,
         "play": Trigger,
         "stop": Trigger,
+        "is_in_remote_control": IsInRemoteControl,
+        "get_programs": GetPrograms,
+        "upload_program": UploadProgram,
+        "update_program": UploadProgram,
+        "download_program": DownloadProgram,
+        "clear_operational_mode": Trigger,
+        "generate_flight_report": GenerateFlightReport,
+        "generate_support_file": GenerateSupportFile,
+        "get_operational_mode": GetOperationalMode,
+        "get_polyscope_version": GetPolyScopeVersion,
+        "get_robot_model": GetRobotModel,
+        "get_safety_status": GetSafetyStatus,
+        "get_serial_number": GetSerialNumber,
+        "get_user_role": GetUserRole,
+        "set_operational_mode": SetOperationalMode,
+        "set_user_role": SetUserRole,
     },
 ):
     def start_robot(self):
+        self._check_call(self.power_off())
         self._check_call(self.power_on())
         self._check_call(self.brake_release())
+        self._check_call(self.unlock_protective_stop())
 
         time.sleep(1)
 
         robot_mode = self.get_robot_mode()
-        self._check_call(robot_mode)
-        if robot_mode.robot_mode.mode != RobotMode.RUNNING:
-            raise Exception(
-                f"Incorrect robot mode: Expected {RobotMode.RUNNING}, got {robot_mode.robot_mode.mode}"
-            )
-
-        self._check_call(self.stop())
+        start_time = time.time()
+        while time.time() - start_time < TIMEOUT_WAIT_SERVICE:
+            self._check_call(robot_mode)
+            if robot_mode.robot_mode.mode == RobotMode.RUNNING:
+                self._check_call(self.stop())
+                return
+            time.sleep(0.1)
+        raise Exception(
+            f"Incorrect robot mode: Expected {RobotMode.RUNNING}, got {robot_mode.robot_mode.mode}"
+        )
 
     def _check_call(self, result):
         if not result.success:
@@ -254,7 +299,11 @@ class ControllerManagerInterface(
         "load_controller": LoadController,
         "unload_controller": UnloadController,
     },
-    services={"list_controllers": ListControllers},
+    services={
+        "list_controllers": ListControllers,
+        "set_hardware_component_state": SetHardwareComponentState,
+        "list_hardware_components": ListHardwareComponents,
+    },
 ):
     def wait_for_controller(self, controller_name, target_state=None, timeout=TIMEOUT_WAIT_SERVICE):
         start_time = time.time()
@@ -300,6 +349,88 @@ class ForceModeInterface(
     pass
 
 
+class FrictionModelInterface(
+    _ServiceInterface,
+    namespace="/friction_model_controller",
+    initial_services={},
+    services={"set_friction_model_parameters": SetFrictionModelParameters},
+):
+    pass
+
+
+def sjtc_trajectory_test(tester, tf_prefix):
+    """Test robot movement."""
+    tester.assertTrue(
+        tester._controller_manager_interface.switch_controller(
+            strictness=SwitchController.Request.BEST_EFFORT,
+            deactivate_controllers=["passthrough_trajectory_controller"],
+            activate_controllers=["scaled_joint_trajectory_controller"],
+        ).ok
+    )
+    # Construct test trajectory
+    test_trajectory = [
+        (Duration(sec=6, nanosec=0), [0.0 for j in ROBOT_JOINTS]),
+        (Duration(sec=9, nanosec=0), [-0.5 for j in ROBOT_JOINTS]),
+        (Duration(sec=12, nanosec=0), [-1.0 for j in ROBOT_JOINTS]),
+    ]
+
+    trajectory = JointTrajectory(
+        joint_names=[tf_prefix + joint for joint in ROBOT_JOINTS],
+        points=[
+            JointTrajectoryPoint(positions=test_pos, time_from_start=test_time)
+            for (test_time, test_pos) in test_trajectory
+        ],
+    )
+
+    # Sending trajectory goal
+    logging.info("Sending simple goal")
+    goal_handle = tester._scaled_follow_joint_trajectory.send_goal(trajectory=trajectory)
+    tester.assertTrue(goal_handle.accepted)
+
+    # Verify execution
+    result = tester._scaled_follow_joint_trajectory.get_result(
+        goal_handle, TIMEOUT_EXECUTE_TRAJECTORY
+    )
+    tester.assertEqual(result.error_code, FollowJointTrajectory.Result.SUCCESSFUL)
+
+
+def sjtc_illegal_trajectory_test(tester, tf_prefix):
+    """
+    Test trajectory server.
+
+    This is more of a validation test that the testing suite does the right thing
+    """
+    tester.assertTrue(
+        tester._controller_manager_interface.switch_controller(
+            strictness=SwitchController.Request.BEST_EFFORT,
+            deactivate_controllers=["passthrough_trajectory_controller"],
+            activate_controllers=["scaled_joint_trajectory_controller"],
+        ).ok
+    )
+    # Construct test trajectory, the second point wrongly starts before the first
+    test_trajectory = [
+        (Duration(sec=6, nanosec=0), [0.0 for j in ROBOT_JOINTS]),
+        (Duration(sec=3, nanosec=0), [-0.5 for j in ROBOT_JOINTS]),
+    ]
+
+    trajectory = JointTrajectory(
+        joint_names=[tf_prefix + joint for joint in ROBOT_JOINTS],
+        points=[
+            JointTrajectoryPoint(positions=test_pos, time_from_start=test_time)
+            for (test_time, test_pos) in test_trajectory
+        ],
+    )
+
+    # Send illegal goal
+    logging.info("Sending illegal goal")
+    goal_handle = tester._scaled_follow_joint_trajectory.send_goal(
+        trajectory=trajectory,
+    )
+
+    # Verify the failure is correctly detected
+    tester.assertFalse(goal_handle.accepted)
+
+
 def _declare_launch_arguments():
     declared_arguments = []
 
@@ -320,6 +451,7 @@ def _declare_launch_arguments():
                 "ur16e",
                 "ur8long",
                 "ur15",
+                "ur18",
                 "ur20",
                 "ur30",
             ],
@@ -329,9 +461,7 @@ def _declare_launch_arguments():
     return declared_arguments
 
 
-def _ursim_action():
-    ur_type = LaunchConfiguration("ur_type")
-
+def _ursim_action(ursim_version="latest", ur_type="ur5e"):
     return ExecuteProcess(
         cmd=[
             PathJoinSubstitution(
@@ -344,13 +474,15 @@ def _ursim_action():
             ),
             "-m",
             ur_type,
+            "-v",
+            ursim_version,
         ],
         name="start_ursim",
         output="screen",
     )
 
 
-def generate_dashboard_test_description():
+def generate_dashboard_test_description(ursim_version="latest", ur_type="ur5e"):
     dashboard_client = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
@@ -367,8 +499,44 @@ def generate_dashboard_test_description():
     )
 
     return LaunchDescription(
-        _declare_launch_arguments() + [ReadyToTest(), dashboard_client, _ursim_action()]
+        _declare_launch_arguments()
+        + [ReadyToTest(), dashboard_client, _ursim_action(ursim_version, ur_type)]
     )
+
+
+def generate_mock_hardware_test_description(
+    tf_prefix="",
+    initial_joint_controller="scaled_joint_trajectory_controller",
+    controller_spawner_timeout=TIMEOUT_WAIT_SERVICE_INITIAL,
+):
+
+    ur_type = LaunchConfiguration("ur_type")
+
+    launch_arguments = {
+        "robot_ip": "0.0.0.0",
+        "ur_type": ur_type,
+        "launch_rviz": "false",
+        "controller_spawner_timeout": str(controller_spawner_timeout),
+        "initial_joint_controller": initial_joint_controller,
+        "headless_mode": "true",
+        "launch_dashboard_client": "true",
+        "start_joint_controller": "false",
+        "use_fake_hardware": "true",
+        "fake_sensor_commands": "true",
+    }
+    if tf_prefix:
+        launch_arguments["tf_prefix"] = tf_prefix
+
+    robot_driver = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare("ur_robot_driver"), "launch", "ur_control.launch.py"]
+            )
+        ),
+        launch_arguments=launch_arguments.items(),
+    )
+
+    return LaunchDescription(_declare_launch_arguments() + [ReadyToTest(), robot_driver])
 
 
 def generate_driver_test_description(

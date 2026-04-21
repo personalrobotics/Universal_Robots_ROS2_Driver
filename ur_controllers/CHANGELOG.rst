@@ -2,6 +2,24 @@
 Changelog for package ur_controllers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.13.0 (2026-04-09)
+-------------------
+* Update scaled JTC (`#1753 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1753>`_)
+* Friction model controller (backport `#1704 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1704>`_) (`#1750 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1750>`_)
+* Remove Werror from CMakeLists (backport `#1720 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1720>`_) (`#1727 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1727>`_)
+* Contributors: Felix Exner, mergify[bot]
+
+2.12.0 (2026-01-13)
+-------------------
+* Ensure latched qos is reliable (backport `#1594 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1594>`_) (`#1632 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1632>`_)
+* Contributors: mergify[bot]
+
+2.11.0 (2025-12-01)
+-------------------
+
+2.10.0 (2025-10-23)
+-------------------
+
 2.9.0 (2025-09-16)
 ------------------
 * ur_controllers: Fix compilation on Windows (backport `#1402 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1402>`_) (`#1412 <https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/issues/1412>`_)

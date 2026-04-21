@@ -44,6 +44,7 @@
 #include <regex>
 #include <string>
 #include <memory>
+#include <vector>
 
 // ROS
 #include "rclcpp/rclcpp.hpp"
@@ -63,6 +64,19 @@
 #include "ur_dashboard_msgs/srv/popup.hpp"
 #include "ur_dashboard_msgs/srv/raw_request.hpp"
 #include "ur_dashboard_msgs/srv/is_in_remote_control.hpp"
+#include "ur_dashboard_msgs/srv/get_programs.hpp"
+#include "ur_dashboard_msgs/srv/download_program.hpp"
+#include "ur_dashboard_msgs/srv/upload_program.hpp"
+#include "ur_dashboard_msgs/srv/get_poly_scope_version.hpp"
+#include "ur_dashboard_msgs/srv/get_serial_number.hpp"
+#include "ur_dashboard_msgs/srv/get_user_role.hpp"
+#include "ur_dashboard_msgs/srv/set_user_role.hpp"
+#include "ur_dashboard_msgs/srv/get_operational_mode.hpp"
+#include "ur_dashboard_msgs/srv/set_operational_mode.hpp"
+#include "ur_dashboard_msgs/srv/get_robot_model.hpp"
+#include "ur_dashboard_msgs/srv/get_safety_status.hpp"
+#include "ur_dashboard_msgs/srv/generate_flight_report.hpp"
+#include "ur_dashboard_msgs/srv/generate_support_file.hpp"
 
 namespace ur_robot_driver
 {
@@ -85,16 +99,19 @@ public:
   virtual ~DashboardClientROS() = default;
 
 private:
-  inline rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr createDashboardTriggerSrv(const std::string& topic,
-                                                                                      const std::string& command,
-                                                                                      const std::string& expected)
+  inline rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr
+  createDashboardTriggerSrv(const std::string& topic, std::function<urcl::DashboardResponse()> command)
   {
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr service = node_->create_service<std_srvs::srv::Trigger>(
-        topic, [&, command, expected](const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
-                                      const std::shared_ptr<std_srvs::srv::Trigger::Response> resp) {
+        topic, [command](const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+                         const std::shared_ptr<std_srvs::srv::Trigger::Response> resp) {
           try {
-            resp->message = this->client_.sendAndReceive(command);
-            resp->success = std::regex_match(resp->message, std::regex(expected));
+            auto response = command();
+            resp->message = response.message;
+            if (response.data.find("status_code") != response.data.end()) {
+              resp->message += ", status_code: " + std::to_string(std::get<int>(response.data["status_code"]));
+            }
+            resp->success = response.ok;
           } catch (const urcl::UrException& e) {
             RCLCPP_ERROR(rclcpp::get_logger("Dashboard_Client"), "Service Call failed: '%s'", e.what());
             resp->message = e.what();
@@ -103,6 +120,63 @@ private:
         });
     return service;
   }
+
+  template <class SrvResponseT>
+  urcl::DashboardResponse dashboardCallWithChecks(std::function<urcl::DashboardResponse()> dashboard_call,
+                                                  SrvResponseT resp)
+  {
+    urcl::DashboardResponse dashboard_response;
+    try {
+      dashboard_response = dashboard_call();
+      resp->success = dashboard_response.ok;
+      resp->answer = dashboard_response.message;
+    } catch (const urcl::NotImplementedException& e) {
+      RCLCPP_ERROR(rclcpp::get_logger("Dashboard_Client"),
+                   "This service call seems not to be implemented (for this robot version). Error message: '%s'",
+                   e.what());
+      resp->answer = "Not implemented for this robot software version.";
+      resp->success = false;
+    } catch (const urcl::UrException& e) {
+      RCLCPP_ERROR(rclcpp::get_logger("Dashboard_Client"), "Service Call failed: '%s'", e.what());
+      resp->answer = e.what();
+      resp->success = false;
+      return dashboard_response;
+    }
+    return dashboard_response;
+  }
+
+  template <class SrvResponseT>
+  void handleDashboardResponseData(std::function<void()> fun, SrvResponseT& resp,
+                                   const urcl::DashboardResponse& dashboard_response)
+  {
+    try {
+      fun();
+    } catch (const std::bad_variant_access& e) {
+      RCLCPP_ERROR(rclcpp::get_logger("Dashboard_Client"), "Service Call failed: '%s'", e.what());
+      std::ostringstream oss;
+      for (const auto& [key, value] : dashboard_response.data) {
+        oss << key << ": ";
+        std::visit([&oss](const auto& arg) { oss << arg; }, value);
+        oss << "\n";
+      }
+      RCLCPP_INFO(rclcpp::get_logger("Dashboard_Client"), "Available data:\n%s", oss.str().c_str());
+      resp->answer = e.what();
+      resp->success = false;
+    } catch (const std::out_of_range& e) {
+      RCLCPP_ERROR(rclcpp::get_logger("Dashboard_Client"), "Service Call failed: '%s'", e.what());
+      std::ostringstream oss;
+      for (const auto& [key, value] : dashboard_response.data) {
+        oss << key << ": ";
+        std::visit([&oss](const auto& arg) { oss << arg; }, value);
+        oss << "\n";
+      }
+      RCLCPP_INFO(rclcpp::get_logger("Dashboard_Client"), "Available data:\n%s", oss.str().c_str());
+      resp->answer = e.what();
+      resp->success = false;
+    }
+  }
+
+  rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter>& parameters);
 
   bool handleRunningQuery(ur_dashboard_msgs::srv::IsProgramRunning::Request::SharedPtr req,
                           ur_dashboard_msgs::srv::IsProgramRunning::Response::SharedPtr resp);
@@ -113,16 +187,22 @@ private:
   bool handleSafetyModeQuery(ur_dashboard_msgs::srv::GetSafetyMode::Request::SharedPtr req,
                              ur_dashboard_msgs::srv::GetSafetyMode::Response::SharedPtr resp);
 
+  bool handleSafetyStatusQuery(ur_dashboard_msgs::srv::GetSafetyStatus::Request::SharedPtr req,
+                               ur_dashboard_msgs::srv::GetSafetyStatus::Response::SharedPtr resp);
+
   bool handleRobotModeQuery(ur_dashboard_msgs::srv::GetRobotMode::Request::SharedPtr req,
                             ur_dashboard_msgs::srv::GetRobotMode::Response::SharedPtr resp);
 
   bool handleRemoteControlQuery(ur_dashboard_msgs::srv::IsInRemoteControl::Request::SharedPtr req,
                                 ur_dashboard_msgs::srv::IsInRemoteControl::Response::SharedPtr resp);
 
+  bool handleGetPolyScopeVersionQuery(ur_dashboard_msgs::srv::GetPolyScopeVersion::Request::SharedPtr req,
+                                      ur_dashboard_msgs::srv::GetPolyScopeVersion::Response::SharedPtr resp);
+
   bool connect();
 
   std::shared_ptr<rclcpp::Node> node_;
-  urcl::DashboardClient client_;
+  std::unique_ptr<urcl::DashboardClient> client_;
 
   urcl::comm::INotifier notifier_;
   urcl::primary_interface::PrimaryClient primary_client_;
@@ -134,6 +214,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr close_safety_popup_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr play_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr power_off_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr power_on_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr restart_safety_service_;
@@ -146,6 +227,10 @@ private:
   rclcpp::Service<ur_dashboard_msgs::srv::AddToLog>::SharedPtr add_to_log_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reconnect_service_;
   rclcpp::Service<ur_dashboard_msgs::srv::RawRequest>::SharedPtr raw_request_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::SetUserRole>::SharedPtr set_user_role_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::SetOperationalMode>::SharedPtr set_operational_mode_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GenerateFlightReport>::SharedPtr generate_flight_report_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GenerateSupportFile>::SharedPtr generate_support_file_service_;
 
   // Query services
   rclcpp::Service<ur_dashboard_msgs::srv::IsProgramRunning>::SharedPtr running_service_;
@@ -156,6 +241,18 @@ private:
   rclcpp::Service<ur_dashboard_msgs::srv::GetSafetyMode>::SharedPtr safety_mode_service_;
   rclcpp::Service<ur_dashboard_msgs::srv::GetRobotMode>::SharedPtr robot_mode_service_;
   rclcpp::Service<ur_dashboard_msgs::srv::IsInRemoteControl>::SharedPtr is_in_remote_control_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetPrograms>::SharedPtr get_programs_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::UploadProgram>::SharedPtr upload_program_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::UploadProgram>::SharedPtr update_program_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::DownloadProgram>::SharedPtr download_program_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetPolyScopeVersion>::SharedPtr get_polyscope_version_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetSerialNumber>::SharedPtr get_serial_number_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetUserRole>::SharedPtr get_user_role_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetOperationalMode>::SharedPtr get_operational_mode_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetRobotModel>::SharedPtr get_robot_model_service_;
+  rclcpp::Service<ur_dashboard_msgs::srv::GetSafetyStatus>::SharedPtr get_safety_status_service_;
+
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 }  // namespace ur_robot_driver
 

@@ -82,6 +82,7 @@ enum StoppingInterface
   STOP_FORCE_MODE,
   STOP_FREEDRIVE,
   STOP_TOOL_CONTACT,
+  STOP_TORQUE,
 };
 
 // We define our own quaternion to use it as a buffer, since we need to pass pointers to the state
@@ -114,7 +115,7 @@ struct Quaternion
 class URPositionHardwareInterface : public hardware_interface::SystemInterface
 {
 public:
-  RCLCPP_SHARED_PTR_DEFINITIONS(URPositionHardwareInterface);
+  RCLCPP_SHARED_PTR_DEFINITIONS(URPositionHardwareInterface)
   URPositionHardwareInterface();
   virtual ~URPositionHardwareInterface();
 
@@ -177,6 +178,7 @@ protected:
   urcl::vector6d_t urcl_position_commands_;
   urcl::vector6d_t urcl_position_commands_old_;
   urcl::vector6d_t urcl_velocity_commands_;
+  urcl::vector6d_t urcl_torque_commands_;
   urcl::vector6d_t urcl_joint_positions_;
   urcl::vector6d_t urcl_joint_velocities_;
   urcl::vector6d_t urcl_joint_efforts_;
@@ -229,6 +231,7 @@ protected:
   bool initialized_;
   double system_interface_initialized_;
   std::atomic_bool async_thread_shutdown_;
+  urcl::VersionInformation version_info_;
   double get_robot_software_version_major_;
   double get_robot_software_version_minor_;
   double get_robot_software_version_bugfix_;
@@ -257,10 +260,15 @@ protected:
   urcl::vector6d_t passthrough_trajectory_accelerations_;
   double passthrough_trajectory_time_from_start_;
 
-  // payload stuff
+  // Payload stuff
   urcl::vector3d_t payload_center_of_gravity_;
   double payload_mass_;
   double payload_async_success_;
+
+  // Friction model parameters
+  urcl::vector6d_t friction_model_viscous_;
+  urcl::vector6d_t friction_model_coulomb_;
+  double friction_model_async_success_;
 
   // force mode parameters
   urcl::vector6d_t force_mode_task_frame_;
@@ -305,6 +313,7 @@ protected:
   std::vector<std::vector<std::string>> start_modes_;
   bool position_controller_running_;
   bool velocity_controller_running_;
+  bool torque_controller_running_;
   bool force_mode_controller_running_ = false;
 
   std::unique_ptr<urcl::UrDriver> ur_driver_;
@@ -320,6 +329,9 @@ protected:
   const std::string TOOL_CONTACT_GPIO = "tool_contact";
 
   std::unordered_map<std::string, std::unordered_map<std::string, bool>> mode_compatibility_;
+
+  std::unique_ptr<urcl::rtde_interface::DataPackage> data_package_buffer_;
+  std::function<bool()> get_data_package;
 };
 }  // namespace ur_robot_driver
 

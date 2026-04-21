@@ -27,7 +27,7 @@ Check also [presentations and videos](ur_robot_driver/doc/resources/README.md) a
         <th>Branch</th>
         <td><a href="https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/tree/humble">humble</a></td>
         <td><a href="https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/tree/jazzy">jazzy</a></td>
-        <td><a href="https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/tree/main">main</a></td>
+        <td><a href="https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/tree/kilted">kilted</a></td>
         <td><a href="https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver/tree/main">main</a></td>
       </tr>
       <tr>
@@ -124,7 +124,7 @@ For getting started, you'll basically need three steps:
    details.
 
    ```bash
-   # Replace ur5e with one of ur3, ur5, ur10, ur3e, ur5e, ur7e, ur10e, ur12e, ur16e, ur8long, ur15, ur20, ur30
+   # Replace ur5e with one of ur3, ur5, ur10, ur3e, ur5e, ur7e, ur10e, ur12e, ur16e, ur8long, ur15, ur18, ur20, ur30
    # Replace the IP address with the IP address of your actual robot / URSim
    ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5e robot_ip:=192.168.56.101
    ```

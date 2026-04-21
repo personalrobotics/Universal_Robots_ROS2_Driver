@@ -10,10 +10,10 @@ jobs:
   check_links:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Restore lychee cache
         id: restore-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .lycheecache
           key: cache-lychee-${{ github.run_id }}-${{ github.run_attempt }}
@@ -32,9 +32,10 @@ jobs:
             --exclude '^http://192\.168\.56\.101'
             --exclude 'kernel\.org\/pub\/linux\/kernel'
             --exclude 'releases/download/v\$%7BURCAP_VERSION%7D/externalcontrol-\$%7BURCAP_VERSION%7D\.jar'
+            --exclude 'https:\/\/wiki\.linuxfoundation\.org\/realtime\/preempt_rt_versions'
             './**/*.md' './**/*.html' './**/*.rst' './**/*.cpp' './**/*.h' './**/*.py'
       - name: Save lychee cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         if: always()
         with:
           path: .lycheecache

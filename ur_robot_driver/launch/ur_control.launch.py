@@ -243,6 +243,7 @@ def launch_setup(context, *args, **kwargs):
             robot_description,
             update_rate_config_file,
             ParameterFile(initial_joint_controllers, allow_substs=True),
+            {"verify_payload_on_set": NotSubstitution(use_fake_hardware)},
         ],
         output="screen",
         condition=IfCondition(use_fake_hardware),
@@ -255,6 +256,7 @@ def launch_setup(context, *args, **kwargs):
             robot_description,
             update_rate_config_file,
             ParameterFile(initial_joint_controllers, allow_substs=True),
+            {"verify_payload_on_set": NotSubstitution(use_fake_hardware)},
         ],
         output="screen",
         condition=UnlessCondition(use_fake_hardware),
@@ -313,6 +315,7 @@ def launch_setup(context, *args, **kwargs):
         package="ur_robot_driver",
         executable="urscript_interface",
         parameters=[{"robot_ip": robot_ip}],
+        condition=UnlessCondition(use_fake_hardware),
         output="screen",
     )
 
